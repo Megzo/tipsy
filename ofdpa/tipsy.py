@@ -43,6 +43,8 @@ import subprocess
 import time
 
 from OFDPA_python import *
+import socket
+import struct
 
 import ip
 
@@ -121,41 +123,87 @@ class PL_portfwd(PL):
             dummy_vlan = 10 #this is just a dummy VLAN for L2 groups
             mac = self.conf.mac_swap_downstream
             if mac:
-                #Creating L2 interface group entry
-                groupId_p = new_uint32_tp()
-                uint32_tp_assign(groupId_p, 0)
-                l2IfaceGroupEntry = ofdpaGroupEntry_t()
-                l2IfaceGroupBucket = ofdpaGroupBucketEntry_t()
-                ofdpaGroupTypeSet(groupId_p, OFDPA_GROUP_ENTRY_TYPE_L2_INTERFACE)
-                ofdpaGroupVlanSet(groupId_p, vlanId)
-                ofdpaGroupPortIdSet(groupId_p, outPhysicalPort)
-                l2IfaceGroupEntry.groupId = uint32_tp_value(groupId_p)
-                l2IfaceGroupBucket.groupId = l2IfaceGroupEntry.groupId
-                l2IfaceGroupBucket.bucketIndex = 0
-                l2IfaceGroupBucket.bucketData.l2Interface.outputPort = ul_port
-                l2IfaceGroupBucket.bucketData.l2Interface.popVlanTag = 1
-                ofdpaGroupAdd(l2IfaceGroupEntry)
-                ofdpaGroupBucketEntryAdd(l2IfaceGroupBucket)
+                #creating L2 interface group entry
+                group_id = new_uint32_tp()
+                uint32_tp_assign(group_id, 0)
+                l2_interface_group_entry = ofdpaGroupEntry_t()
+                l2_interface_group_bucket = ofdpaGroupBucketEntry_t()
+                ofdpaGroupTypeSet(group_id, OFDPA_GROUP_ENTRY_TYPE_L2_INTERFACE)
+                ofdpaGroupVlanSet(group_id, dummy_vlan)
+                ofdpaGroupPortIdSet(group_id, ul_port)
+                l2_interface_group_entry.groupId = uint32_tp_value(group_id)
+                l2_interface_group_bucket.groupId = l2_interface_group_entry.groupId
+                l2_interface_group_bucket.bucketIndex = 0
+                l2_interface_group_bucket.bucketData.l2Interface.outputPort = ul_port
+                l2_interface_group_bucket.bucketData.l2Interface.popVlanTag = 1
+                ofdpaGroupAdd(l2_interface_group_entry)
+                ofdpaGroupBucketEntryAdd(l2_interface_group_bucket)
 
-                #greating L2 rewire group
-                groupId_p = new_uint32_tp()
-                uint32_tp_assign(groupId_p, 0)
-                l2RewriteGroupEntry = ofdpaGroupEntry_t()
-                l2RewriteGroupBucket = ofdpaGroupBucketEntry_t()
-                ofdpaGroupTypeSet(groupId_p, OFDPA_GROUP_ENTRY_TYPE_L2_REWRITE)
-                l2RewriteGroupEntry.groupId = uint32_tp_value(groupId_p)
-                l2RewriteGroupBucket.groupId = l2RewriteGroupEntry.groupId
-                l2RewriteGroupBucket.referenceGroupId = l2IfaceGroupEntry.groupId #this should refer to L2 group
-                l2RewriteGroupBucket.bucketIndex = 0
-                l2RewriteGroupBucket.bucketData.l2Rewrite.dstMac = mac
-                ofdpaGroupAdd(l2RewriteGroupEntry)
-                ofdpaGroupBucketEntryAdd(l2RewriteGroupBucket)
+                #creating L2 rewire group
+                group_id = new_uint32_tp()
+                uint32_tp_assign(group_id, 0)
+                l2_rewrite_group_entry = ofdpaGroupEntry_t()
+                l2_rewrite_group_bucket = ofdpaGroupBucketEntry_t()
+                ofdpaGroupTypeSet(group_id, OFDPA_GROUP_ENTRY_TYPE_L2_REWRITE)
+                ofdpaGroupIndexSet(group_id, 1)
+                l2_rewrite_group_entry.groupId = uint32_tp_value(group_id)
+                l2_rewrite_group_bucket.groupId = l2_rewrite_group_entry.groupId
+                l2_rewrite_group_bucket.referenceGroupId = l2_interface_group_entry.groupId #this should refer to L2 interface group
+                l2_rewrite_group_bucket.bucketIndex = 0
+                l2_rewrite_group_bucket.bucketData.l2Rewrite.dstMac = mac
+                ofdpaGroupAdd(l2_rewrite_group_entry)
+                ofdpaGroupBucketEntryAdd(l2_rewrite_group_bucket)
+
+                #creating entry in ACL table where in_port=dl_port, action=group:l2_rewrite_group_entry.groupId
+                acl_flow_entry = ofdpaFlowEntry_t()
+                ofdpaFlowEntryInit(OFDPA_FLOW_TABLE_ID_ACL_POLICY, acl_flow_entry)
+                acl_flow_entry.flowData.policyacl_flow_entry.match_criteria.inPort = dl_port
+                acl_flow_entry.flowData.policyacl_flow_entry.match_criteria.inPortMask = OFDPA_INPORT_EXACT_MASK
+                acl_flow_entry.flowData.policyacl_flow_entry.match_criteria.etherTypeMask = OFDPA_ETHERTYPE_ALL_MASK
+                acl_flow_entry.flowData.policyacl_flow_entry.groupID = l2_rewrite_group_entry.groupId
+                ofdpaFlowAdd(acl_flow_entry)
 
             mac = self.conf.mac_swap_upstream
             if mac:
-                actions = [parser.OFPActionSetField(eth_src=mac)]
-                match = {'in_port': ul_port}
-                mod_flow(match=match, actions=actions, output=dl_port)
+                #creating L2 interface group entry
+                group_id = new_uint32_tp()
+                uint32_tp_assign(group_id, 0)
+                l2_interface_group_entry = ofdpaGroupEntry_t()
+                l2_interface_group_bucket = ofdpaGroupBucketEntry_t()
+                ofdpaGroupTypeSet(group_id, OFDPA_GROUP_ENTRY_TYPE_L2_INTERFACE)
+                ofdpaGroupVlanSet(group_id, dummy_vlan)
+                ofdpaGroupPortIdSet(group_id, dl_port)
+                l2_interface_group_entry.groupId = uint32_tp_value(group_id)
+                l2_interface_group_bucket.groupId = l2_interface_group_entry.groupId
+                l2_interface_group_bucket.bucketIndex = 0
+                l2_interface_group_bucket.bucketData.l2Interface.outputPort = dl_port
+                l2_interface_group_bucket.bucketData.l2Interface.popVlanTag = 1
+                ofdpaGroupAdd(l2_interface_group_entry)
+                ofdpaGroupBucketEntryAdd(l2_interface_group_bucket)
+
+                #creating L2 rewire group
+                group_id = new_uint32_tp()
+                uint32_tp_assign(group_id, 0)
+                l2_rewrite_group_entry = ofdpaGroupEntry_t()
+                l2_rewrite_group_bucket = ofdpaGroupBucketEntry_t()
+                ofdpaGroupTypeSet(group_id, OFDPA_GROUP_ENTRY_TYPE_L2_REWRITE)
+                ofdpaGroupIndexSet(group_id, 2)
+                l2_rewrite_group_entry.groupId = uint32_tp_value(group_id)
+                l2_rewrite_group_bucket.groupId = l2_rewrite_group_entry.groupId
+                l2_rewrite_group_bucket.referenceGroupId = l2_interface_group_entry.groupId #this should refer to L2 interface group
+                l2_rewrite_group_bucket.bucketIndex = 0
+                l2_rewrite_group_bucket.bucketData.l2Rewrite.dstMac = mac
+                ofdpaGroupAdd(l2_rewrite_group_entry)
+                ofdpaGroupBucketEntryAdd(l2_rewrite_group_bucket)
+
+                #creating entry in ACL table where in_port=ul_port, action=group:l2_rewrite_group_entry.groupId
+                acl_flow_entry = ofdpaFlowEntry_t()
+                ofdpaFlowEntryInit(OFDPA_FLOW_TABLE_ID_ACL_POLICY, acl_flow_entry)
+                acl_flow_entry.flowData.policyacl_flow_entry.match_criteria.inPort = ul_port
+                acl_flow_entry.flowData.policyacl_flow_entry.match_criteria.inPortMask = OFDPA_INPORT_EXACT_MASK
+                acl_flow_entry.flowData.policyacl_flow_entry.match_criteria.etherTypeMask = OFDPA_ETHERTYPE_ALL_MASK
+                acl_flow_entry.flowData.policyacl_flow_entry.groupID = l2_rewrite_group_entry.groupId
+                ofdpaFlowAdd(acl_flow_entry)
 
 
 class PL_l2fwd(PL):
@@ -173,31 +221,108 @@ class PL_l2fwd(PL):
     def __init__(self, parent, conf):
         super(PL_l2fwd, self).__init__(parent, conf)
         self.tables = {
-            'selector'     : 0,
-            'upstream'     : 1,
-            'downstream' : 2,
-            'drop'             : 3,
+            'vlan'         : 10,
+            'bridge'       : 50,
+            'drop'         : 60,
         }
 
     def config_switch(self, parser):
         ul_port = self.parent.ul_port
         dl_port = self.parent.dl_port
 
-        table = 'selector'
-        self.parent.mod_flow(table, match={'in_port': dl_port}, goto='upstream')
-        self.parent.mod_flow(table, match={'in_port': ul_port}, goto='downstream')
+        #initialize OFDPA API connection
+        rc = ofdpaClientInitialize("TIPSY L2 Bridging")
+        if rc == OFDPA_E_NONE:
 
-        for d in ['upstream', 'downstream']:
-            for entry in self.conf.get('%s-table' % d):
-                self.mod_table('add', d, entry)
+            ul_vlan_id = 10 #this VLAN will tell from a packet that it came from ul_port
+            dl_vlan_id = 20 #this VLAN will tell from a packet that it came from dl_port
 
-    def mod_table(self, cmd, table, entry):
-        mod_flow = self.parent.mod_flow
-        out_port = {'upstream': self.parent.ul_port,
-                                'downstream': self.parent.dl_port}[table]
-        out_port = entry.out_port or out_port
+            #creating L2 Interface Group Entry for both dl_port and ul_port
+            group_id = new_uint32_tp()
+            uint32_tp_assign(group_id, 0)
+            l2_interface_group_entry_ul = ofdpaGroupEntry_t()
+            l2_interface_group_bucket_ul = ofdpaGroupBucketEntry_t()
+            ofdpaGroupTypeSet(group_id, OFDPA_GROUP_ENTRY_TYPE_L2_INTERFACE)
+            ofdpaGroupVlanSet(group_id, dl_vlan_id) #this should refer to in_port=dl_port, thus it is dl_vlan_id
+            ofdpaGroupPortIdSet(group_id, ul_port)
+            l2_interface_group_entry_ul.groupId = uint32_tp_value(group_id)
+            l2_interface_group_bucket_ul.groupId = l2_interface_group_entry_ul.groupId
+            l2_interface_group_bucket_ul.bucketIndex = 0
+            l2_interface_group_bucket_ul.bucketData.l2Interface.outputPort = ul_port
+            l2_interface_group_bucket_ul.bucketData.l2Interface.popVlanTag = 1
+            ofdpaGroupAdd(l2_interface_group_entry_ul)
+            ofdpaGroupBucketEntryAdd(l2_interface_group_bucket_ul)
 
-        mod_flow(table, match={'eth_dst': entry.mac}, output=out_port, cmd=cmd)
+            group_id = new_uint32_tp()
+            uint32_tp_assign(group_id, 0)
+            l2_interface_group_entry_dl = ofdpaGroupEntry_t()
+            l2_interface_group_bucket_dl = ofdpaGroupBucketEntry_t()
+            ofdpaGroupTypeSet(group_id, OFDPA_GROUP_ENTRY_TYPE_L2_INTERFACE)
+            ofdpaGroupVlanSet(group_id, ul_vlan_id) #this should refer to in_port=ul_port, thus it is ul_vlan_id
+            ofdpaGroupPortIdSet(group_id, ul_port)
+            l2_interface_group_entry_dl.groupId = uint32_tp_value(group_id)
+            l2_interface_group_bucket_dl.groupId = l2_interface_group_entry_dl.groupId
+            l2_interface_group_bucket_dl.bucketIndex = 0
+            l2_interface_group_bucket_dl.bucketData.l2Interface.outputPort = dl_port
+            l2_interface_group_bucket_dl.bucketData.l2Interface.popVlanTag = 1
+            ofdpaGroupAdd(l2_interface_group_entry_dl)
+            ofdpaGroupBucketEntryAdd(l2_interface_group_bucket_dl)
+
+            #creating VLAN table entries
+            vlan_flow_entry_ul = ofdpaFlowEntry_t()
+            ofdpaFlowEntryInit(OFDPA_FLOW_TABLE_ID_VLAN, vlan_flow_entry_ul)
+            vlan_flow_entry_ul.flowData.vlanFlowEntry.gotoTableId = OFDPA_FLOW_TABLE_ID_TERMINATION_MAC
+            vlan_flow_entry_ul.flowData.vlanFlowEntry.match_criteria.inPort = ul_port
+            vlan_flow_entry_ul.flowData.vlanFlowEntry.match_criteria.vlanId = (OFDPA_VID_PRESENT | ul_vlan_id)
+            vlan_flow_entry_ul.flowData.vlanFlowEntry.match_criteria.vlanIdMask = (OFDPA_VID_PRESENT | OFDPA_VID_EXACT_MASK)
+            ofdpaFlowAdd(vlan_flow_entry_ul)
+
+            vlan_flow_entry_dl = ofdpaFlowEntry_t()
+            ofdpaFlowEntryInit(OFDPA_FLOW_TABLE_ID_VLAN, vlan_flow_entry_dl)
+            vlan_flow_entry_dl.flowData.vlanFlowEntry.gotoTableId = OFDPA_FLOW_TABLE_ID_TERMINATION_MAC
+            vlan_flow_entry_dl.flowData.vlanFlowEntry.match_criteria.inPort = dl_port
+            vlan_flow_entry_dl.flowData.vlanFlowEntry.match_criteria.vlanId = (OFDPA_VID_PRESENT | dl_vlan_id)
+            vlan_flow_entry_dl.flowData.vlanFlowEntry.match_criteria.vlanIdMask = (OFDPA_VID_PRESENT | OFDPA_VID_EXACT_MASK)
+            ofdpaFlowAdd(vlan_flow_entry_dl)
+
+            #we also have to create entries to accept packets with no VLAN header and push VLAN header
+            vlan_flow_entry_push_ul_vlan = ofdpaFlowEntry_t()
+            ofdpaFlowEntryInit(OFDPA_FLOW_TABLE_ID_VLAN, vlan_flow_entry_push_ul_vlan)
+            vlan_flow_entry_push_ul_vlan.flowData.vlanFlowEntry.match_criteria.vlanId = 0 #there is no VLAN present
+            vlan_flow_entry_push_ul_vlan.flowData.vlanFlowEntry.match_criteria.inPort = ul_port #packet came from ul_port
+            vlan_flow_entry_push_ul_vlan.flowData.vlanFlowEntry.setVlanIdAction = 1 #set VLAN aka push a header
+            vlan_flow_entry_push_ul_vlan.flowData.vlanFlowEntry.newVlanId = (OFDPA_VID_PRESENT | ul_vlan_id) #the VLAN ID
+            ofdpaFlowAdd(vlan_flow_entry_push_ul_vlan)
+
+            vlan_flow_entry_push_dl_vlan = ofdpaFlowEntry_t()
+            ofdpaFlowEntryInit(OFDPA_FLOW_TABLE_ID_VLAN, vlan_flow_entry_push_dl_vlan)
+            vlan_flow_entry_push_dl_vlan.flowData.vlanFlowEntry.match_criteria.vlanId = 0  # there is no VLAN present
+            vlan_flow_entry_push_dl_vlan.flowData.vlanFlowEntry.match_criteria.inPort = dl_port  # packet came from ul_port
+            vlan_flow_entry_push_dl_vlan.flowData.vlanFlowEntry.setVlanIdAction = 1  # set VLAN aka push a header
+            vlan_flow_entry_push_dl_vlan.flowData.vlanFlowEntry.newVlanId = (OFDPA_VID_PRESENT | dl_vlan_id)  # the VLAN ID
+            ofdpaFlowAdd(vlan_flow_entry_push_dl_vlan)
+
+            #upstream flow rules which came from dl_port thus VLAN is dl_vlan_id, and must go to output:ul_port thus l2_interface_group_entry_ul
+            for entry in self.conf.get('upstream-table'):
+                self.mod_table('add', dl_vlan_id, l2_interface_group_entry_ul.groupId, entry)
+
+            #downstream flow rules which came from ul_port thus VLAN is ul_vlan_id, and must go to output:dl_port thus l2_interface_group_entry_dl
+            for entry in self.conf.get('downstream-table'):
+                self.mod_table('add', ul_vlan_id, l2_interface_group_entry_dl.groupId, entry)
+
+    def mod_table(self, cmd, vlan_id, group_id, entry):
+        #create bridge flow table entry in table 50
+        #vlan should mark the in_port, thus where vlan=ul_vlan_id --> in_port=ul_port  --> output: group=l2_interface_group_entry_dl
+        #                                         vlan=dl_vlan_id --> in_port=dl_port  --> output: group=l2_interface_group_entry_ul
+        bridging_flow_entry = ofdpaFlowEntry_t()
+        ofdpaFlowEntryInit(OFDPA_FLOW_TABLE_ID_BRIDGING, bridging_flow_entry)
+        bridging_flow_entry.flowData.bridging_flow_entry.gotoTableId = OFDPA_FLOW_TABLE_ID_ACL_POLICY
+        bridging_flow_entry.flowData.bridging_flow_entry.groupID = group_id
+        bridging_flow_entry.flowData.bridging_flow_entry.match_criteria.vlanId = (OFDPA_VID_PRESENT | vlan_id) #this VLAN ID comes from the argument
+        bridging_flow_entry.flowData.bridging_flow_entry.match_criteria.vlanIdMask = (OFDPA_VID_PRESENT | OFDPA_VID_EXACT_MASK)
+        MACAddress_set(bridging_flow_entry.flowData.bridging_flow_entry.match_criteria.destMac, entry.mac)
+        MACAddress_set(bridging_flow_entry.flowData.bridging_flow_entry.match_criteria.destMacMask, "ff:ff:ff:ff:ff:ff")
+        ofdpaFlowAdd(bridging_flow_entry)
 
     def do_mod_table(self, args):
         self.mod_table(args.cmd, args.table, args.entry)
@@ -208,11 +333,11 @@ class PL_l3fwd(PL):
     def __init__(self, parent, conf):
         super(PL_l3fwd, self).__init__(parent, conf)
         self.tables = {
-            'mac_fwd'                         : 0,
-            'arp_select'                    : 1,
+            'mac_fwd'               : 0,
+            'arp_select'            : 1,
             'upstream_l3_table'     : 2,
-            'downstream_l3_table' : 3,
-            'drop'                                : 4,
+            'downstream_l3_table'   : 3,
+            'drop'                  : 4,
         }
         self.gr_next = 0
         self.gr_table = {}
@@ -223,53 +348,170 @@ class PL_l3fwd(PL):
 
         # A basic MAC table lookup to check that the L2 header of the
         # receiver packet contains the router's own MAC address(es) in
-        # which case forward to the =ARPselect= module, drop otherwise
+        # Termination MAC Flow Table (20)
         #
-        # (We don't modify the hwaddr of a kernel interface, or set the
-        # hwaddr of a dpdk interface, we just check whether incoming
-        # packets have the correct addresses.)
-        table = 'mac_fwd'
-        match = {'in_port': ul_port,
-                         'eth_dst': self.conf.sut.ul_port_mac}
-        self.parent.mod_flow(table, match=match, goto='arp_select')
-        match = {'in_port': dl_port,
-                         'eth_dst': self.conf.sut.dl_port_mac}
-        self.parent.mod_flow(table, match=match, goto='arp_select')
+        # Than L3 addresses go to Routing Table (30) where group action
+        # must refer to a next hop group a.k.a. L3 Unicast Group Entry
 
-        # arp_select: direct ARP packets to the infra (unimplemented) and
-        # IPv4 packets to the L3FIB for L3 processing, otherwise drop
-        table = 'arp_select'
-        match = {'eth_type': ETH_TYPE_ARP}
-        self.parent.mod_flow(table, match=match, goto='drop')
-        match = {'eth_type': ETH_TYPE_IP, 'in_port': dl_port}
-        self.parent.mod_flow(table, match=match, goto='upstream_l3_table')
-        match = {'eth_type': ETH_TYPE_IP, 'in_port': ul_port}
-        self.parent.mod_flow(table, match=match, goto='downstream_l3_table')
+        #Connect to OFDPA API
+        rc = ofdpaClientInitialize("TIPSY L3 Routing")
+        if rc == OFDPA_E_NONE:
 
-        # L3FIB: perform longest-prefix-matching from an IP lookup table
-        # and forward packets to the appropriate group table entry for
-        # next-hop processing or drop if no matching L3 entry is found
-        for d in ['upstream', 'downstream']:
-            for entry in self.conf.get('%s_group_table' % d):
-                self.add_group_table_entry(d, entry)
+            ul_vlan_id = 10 #this VLAN will tell from a packet that it came from ul_port
+            dl_vlan_id = 20 #this VLAN will tell from a packet that it came from dl_port
 
-            for entry in self.conf.get('%s_l3_table' % d):
-                self.mod_l3_table('add', d, entry)
+            #creating L2 Interface Group Entry for both dl_port and ul_port
+            group_id = new_uint32_tp()
+            uint32_tp_assign(group_id, 0)
+            l2_interface_group_entry_ul = ofdpaGroupEntry_t()
+            l2_interface_group_bucket_ul = ofdpaGroupBucketEntry_t()
+            ofdpaGroupTypeSet(group_id, OFDPA_GROUP_ENTRY_TYPE_L2_INTERFACE)
+            ofdpaGroupVlanSet(group_id, dl_vlan_id) #this should refer to in_port=dl_port, thus it is dl_vlan_id
+            ofdpaGroupPortIdSet(group_id, ul_port)
+            l2_interface_group_entry_ul.groupId = uint32_tp_value(group_id)
+            l2_interface_group_bucket_ul.groupId = l2_interface_group_entry_ul.groupId
+            l2_interface_group_bucket_ul.bucketIndex = 0
+            l2_interface_group_bucket_ul.bucketData.l2Interface.outputPort = ul_port
+            l2_interface_group_bucket_ul.bucketData.l2Interface.popVlanTag = 1
+            ofdpaGroupAdd(l2_interface_group_entry_ul)
+            ofdpaGroupBucketEntryAdd(l2_interface_group_bucket_ul)
 
-    def mod_l3_table(self, cmd, table_prefix, entry):
-        parser = self.parent.dp.ofproto_parser
-        if table_prefix == 'upstream':
-            gr_offset = 0
-        else:
-            gr_offset = len(self.conf.upstream_group_table)
-        table = '%s_l3_table' % table_prefix
-        addr = '%s/%s' % (entry.ip, entry.prefix_len)
-        match = {'eth_type': ETH_TYPE_IP, 'ipv4_dst': addr}
-        out_group = gr_offset + entry.nhop
-        action = parser.OFPActionGroup(out_group)
-        self.parent.mod_flow(table, match=match, actions=[action], cmd=cmd)
+            group_id = new_uint32_tp()
+            uint32_tp_assign(group_id, 0)
+            l2_interface_group_entry_dl = ofdpaGroupEntry_t()
+            l2_interface_group_bucket_dl = ofdpaGroupBucketEntry_t()
+            ofdpaGroupTypeSet(group_id, OFDPA_GROUP_ENTRY_TYPE_L2_INTERFACE)
+            ofdpaGroupVlanSet(group_id, ul_vlan_id) #this should refer to in_port=ul_port, thus it is ul_vlan_id
+            ofdpaGroupPortIdSet(group_id, ul_port)
+            l2_interface_group_entry_dl.groupId = uint32_tp_value(group_id)
+            l2_interface_group_bucket_dl.groupId = l2_interface_group_entry_dl.groupId
+            l2_interface_group_bucket_dl.bucketIndex = 0
+            l2_interface_group_bucket_dl.bucketData.l2Interface.outputPort = dl_port
+            l2_interface_group_bucket_dl.bucketData.l2Interface.popVlanTag = 1
+            ofdpaGroupAdd(l2_interface_group_entry_dl)
+            ofdpaGroupBucketEntryAdd(l2_interface_group_bucket_dl)
 
-    def add_group_table_entry(self, direction, entry):
+            #Then we set up the appropriate L3 Unicast Groups
+            entry = self.conf.get('upstream_group_table')
+            l3_unicast_group_entry_ul = ofdpaGroupEntry_t()
+            l3_unicast_group_bucket_ul = ofdpaGroupBucketEntry_t()
+            l3_unicast_group_id_ul = new_uint32_tp()
+            ofdpaGroupTypeSet(l3_unicast_group_id_ul, OFDPA_GROUP_ENTRY_TYPE_L3_UNICAST)
+            ofdpaGroupIndexSet(l3_unicast_group_id_ul, 1) #this is the first L3 group
+            l3_unicast_group_entry_ul.groupId = uint32_tp_value(l3_unicast_group_id_ul)
+            l3_unicast_group_bucket_ul.groupId = l3_unicast_group_entry_ul.groupId
+            l3_unicast_group_bucket_ul.referenceGroupId = l2_interface_group_entry_ul.groupId #refer to L2 Interface Group for ul_port
+            MACAddress_set(l3_unicast_group_bucket_ul.bucketData.l3Unicast.srcMac, entry.smac)
+            MACAddress_set(l3_unicast_group_bucket_ul.bucketData.l3Unicast.dstMac, entry.dmac)
+            l3_unicast_group_bucket_ul.bucketData.l3Unicast.vlanId = (ul_vlan_id | OFDPA_VID_PRESENT)
+            ofdpaGroupAdd(l3_unicast_group_entry_ul)
+            ofdpaGroupBucketEntryAdd(l3_unicast_group_bucket_ul)
+
+            entry = self.conf.get('downstream_group_table')
+            l3_unicast_group_entry_dl = ofdpaGroupEntry_t()
+            l3_unicast_group_bucket_dl = ofdpaGroupBucketEntry_t()
+            l3_unicast_group_id_dl = new_uint32_tp()
+            ofdpaGroupTypeSet(l3_unicast_group_id_dl, OFDPA_GROUP_ENTRY_TYPE_L3_UNICAST)
+            ofdpaGroupIndexSet(l3_unicast_group_id_dl, 2)  # this is the second L3 group
+            l3_unicast_group_entry_dl.groupId = uint32_tp_value(l3_unicast_group_id_dl)
+            l3_unicast_group_bucket_dl.groupId = l3_unicast_group_entry_dl.groupId
+            l3_unicast_group_bucket_dl.referenceGroupId = l2_interface_group_entry_dl.groupId  # refer to L2 Interface Group for dl_port
+            MACAddress_set(l3_unicast_group_bucket_dl.bucketData.l3Unicast.srcMac, entry.smac)
+            MACAddress_set(l3_unicast_group_bucket_dl.bucketData.l3Unicast.dstMac, entry.dmac)
+            l3_unicast_group_bucket_dl.bucketData.l3Unicast.vlanId = (dl_vlan_id | OFDPA_VID_PRESENT)
+            ofdpaGroupAdd(l3_unicast_group_entry_dl)
+            ofdpaGroupBucketEntryAdd(l3_unicast_group_bucket_dl)
+
+            #now we add VLAN entries to VLAN Flow Table (10)
+            vlan_flow_entry_ul = ofdpaFlowEntry_t()
+            ofdpaFlowEntryInit(OFDPA_FLOW_TABLE_ID_VLAN, vlan_flow_entry_ul)
+            vlan_flow_entry_ul.flowData.vlanFlowEntry.gotoTableId = OFDPA_FLOW_TABLE_ID_TERMINATION_MAC
+            vlan_flow_entry_ul.flowData.vlanFlowEntry.match_criteria.inPort = ul_port
+            vlan_flow_entry_ul.flowData.vlanFlowEntry.match_criteria.vlanId = (OFDPA_VID_PRESENT | ul_vlan_id)
+            vlan_flow_entry_ul.flowData.vlanFlowEntry.match_criteria.vlanIdMask = (OFDPA_VID_PRESENT | OFDPA_VID_EXACT_MASK)
+            ofdpaFlowAdd(vlan_flow_entry_ul)
+
+            vlan_flow_entry_dl = ofdpaFlowEntry_t()
+            ofdpaFlowEntryInit(OFDPA_FLOW_TABLE_ID_VLAN, vlan_flow_entry_dl)
+            vlan_flow_entry_dl.flowData.vlanFlowEntry.gotoTableId = OFDPA_FLOW_TABLE_ID_TERMINATION_MAC
+            vlan_flow_entry_dl.flowData.vlanFlowEntry.match_criteria.inPort = dl_port
+            vlan_flow_entry_dl.flowData.vlanFlowEntry.match_criteria.vlanId = (OFDPA_VID_PRESENT | dl_vlan_id)
+            vlan_flow_entry_dl.flowData.vlanFlowEntry.match_criteria.vlanIdMask = (OFDPA_VID_PRESENT | OFDPA_VID_EXACT_MASK)
+            ofdpaFlowAdd(vlan_flow_entry_dl)
+
+            #we also have to create entries to accept packets with no VLAN header and push VLAN header
+            vlan_flow_entry_push_ul_vlan = ofdpaFlowEntry_t()
+            ofdpaFlowEntryInit(OFDPA_FLOW_TABLE_ID_VLAN, vlan_flow_entry_push_ul_vlan)
+            vlan_flow_entry_push_ul_vlan.flowData.vlanFlowEntry.match_criteria.vlanId = 0 #there is no VLAN present
+            vlan_flow_entry_push_ul_vlan.flowData.vlanFlowEntry.match_criteria.inPort = ul_port #packet came from ul_port
+            vlan_flow_entry_push_ul_vlan.flowData.vlanFlowEntry.setVlanIdAction = 1 #set VLAN aka push a header
+            vlan_flow_entry_push_ul_vlan.flowData.vlanFlowEntry.newVlanId = (OFDPA_VID_PRESENT | ul_vlan_id) #the VLAN ID
+            ofdpaFlowAdd(vlan_flow_entry_push_ul_vlan)
+
+            vlan_flow_entry_push_dl_vlan = ofdpaFlowEntry_t()
+            ofdpaFlowEntryInit(OFDPA_FLOW_TABLE_ID_VLAN, vlan_flow_entry_push_dl_vlan)
+            vlan_flow_entry_push_dl_vlan.flowData.vlanFlowEntry.match_criteria.vlanId = 0  # there is no VLAN present
+            vlan_flow_entry_push_dl_vlan.flowData.vlanFlowEntry.match_criteria.inPort = dl_port  # packet came from ul_port
+            vlan_flow_entry_push_dl_vlan.flowData.vlanFlowEntry.setVlanIdAction = 1  # set VLAN aka push a header
+            vlan_flow_entry_push_dl_vlan.flowData.vlanFlowEntry.newVlanId = (OFDPA_VID_PRESENT | dl_vlan_id)  # the VLAN ID
+            ofdpaFlowAdd(vlan_flow_entry_push_dl_vlan)
+
+            #add MAC address of the router into the Termination MAC Flow Table (20)
+            term_mac_flow_entry_ul = ofdpaFlowEntry_t()
+            ofdpaFlowEntryInit(OFDPA_FLOW_TABLE_ID_TERMINATION_MAC, term_mac_flow_entry_ul)
+            term_mac_flow_entry_ul.flowData.terminationMacFlowEntry.gotoTableId = OFDPA_FLOW_TABLE_ID_UNICAST_ROUTING
+            term_mac_flow_entry_ul.flowData.terminationMacFlowEntry.match_criteria.inPort = ul_port
+            term_mac_flow_entry_ul.flowData.terminationMacFlowEntry.match_criteria.inPortMask = OFDPA_INPORT_EXACT_MASK
+            term_mac_flow_entry_ul.flowData.terminationMacFlowEntry.match_criteria.etherType = 0x0800
+            MACAddress_set(term_mac_flow_entry_ul.flowData.terminationMacFlowEntry.match_criteria.destMac, self.conf.sut.ul_port_mac)
+            MACAddress_set(term_mac_flow_entry_ul.flowData.terminationMacFlowEntry.match_criteria.destMacMask,"ff:ff:ff:ff:ff:ff")
+            term_mac_flow_entry_ul.flowData.terminationMacFlowEntry.match_criteria.vlanId = OFDPA_VID_PRESENT | ul_vlan_id
+            term_mac_flow_entry_ul.flowData.terminationMacFlowEntry.match_criteria.vlanIdMask = OFDPA_VID_PRESENT | OFDPA_VID_EXACT_MASK
+            ofdpaFlowAdd(term_mac_flow_entry_ul)
+
+            term_mac_flow_entry_dl = ofdpaFlowEntry_t()
+            ofdpaFlowEntryInit(OFDPA_FLOW_TABLE_ID_TERMINATION_MAC, term_mac_flow_entry_dl)
+            term_mac_flow_entry_dl.flowData.terminationMacFlowEntry.gotoTableId = OFDPA_FLOW_TABLE_ID_UNICAST_ROUTING
+            term_mac_flow_entry_dl.flowData.terminationMacFlowEntry.match_criteria.inPort = dl_port
+            term_mac_flow_entry_dl.flowData.terminationMacFlowEntry.match_criteria.inPortMask = OFDPA_INPORT_EXACT_MASK
+            term_mac_flow_entry_dl.flowData.terminationMacFlowEntry.match_criteria.etherType = 0x0800
+            MACAddress_set(term_mac_flow_entry_dl.flowData.terminationMacFlowEntry.match_criteria.destMac, self.conf.sut.dl_port_mac)
+            MACAddress_set(term_mac_flow_entry_dl.flowData.terminationMacFlowEntry.match_criteria.destMacMask, "ff:ff:ff:ff:ff:ff")
+            term_mac_flow_entry_dl.flowData.terminationMacFlowEntry.match_criteria.vlanId = OFDPA_VID_PRESENT | dl_vlan_id
+            term_mac_flow_entry_dl.flowData.terminationMacFlowEntry.match_criteria.vlanIdMask = OFDPA_VID_PRESENT | OFDPA_VID_EXACT_MASK
+            ofdpaFlowAdd(term_mac_flow_entry_dl)
+
+            #So here is a thing: normally in L3 Routing Table you can distiguis two packets with the same IP by a VRF tag
+            #You can assign a VRF by the income port and/or vlan tag
+            #But it seems that in OFDPA there is no way for using VRF
+            #Maybe I'am wrong but this should tell it: http://lumanetworks.github.io/of-dpa/doc/html/d1/d17/structofdpaUnicastRoutingFlowMatch__s.html
+            #So in the case that TIPSY wants to make two rules for the same IP but with different in_port
+            # unfortunately we cannot distiguis so the second rule will overwrite the first one
+
+            #Now we can add the actual IP addresses to Routing Flow Table (30)
+            for entry in self.conf.get('upstream_l3_table'):
+                self.mod_l3_table('add', l3_unicast_group_entry_ul.groupId, entry)
+            for entry in self.conf.get('downstream_l3_table'):
+                self.mod_l3_table('add', l3_unicast_group_entry_dl.groupId, entry)
+
+
+    def mod_l3_table(self, cmd, group_id, entry):
+        l3_unicast_routing_flow_entry = ofdpaFlowEntry_t()
+        ofdpaFlowEntryInit(OFDPA_FLOW_TABLE_ID_UNICAST_ROUTING, l3_unicast_routing_flow_entry)
+        l3_unicast_routing_flow_entry.flowData.unicastRoutingFlowEntry.gotoTableId = OFDPA_FLOW_TABLE_ID_ACL_POLICY
+        l3_unicast_routing_flow_entry.flowData.unicastRoutingFlowEntry.groupID = group_id
+        l3_unicast_routing_flow_entry.flowData.unicastRoutingFlowEntry.match_criteria.etherType = 0x0800
+        l3_unicast_routing_flow_entry.flowData.unicastRoutingFlowEntry.match_criteria.dstIp4 = ip_to_int(entry.ip)
+        l3_unicast_routing_flow_entry.flowData.unicastRoutingFlowEntry.match_criteria.dstIp4Mask = ip_mask_to_int(entry.prefix_len)
+        ofdpaFlowAdd(l3_unicast_routing_flow_entry)
+
+    def ip_to_int(self, address):
+        return struct.unpack("!L", socket.inet_aton(address))[0]
+
+    def ip_mask_to_int(self, mask):
+        return int(2^32 - 2^(32-mask))
+
+    def add_group_table_entry(self, vlan_id, l2_interface_group_id, entry):
         parser = self.parent.dp.ofproto_parser
         port_name = '%sl_port' % direction[0]
         out_port = entry.port or self.parent.__dict__[port_name]
@@ -279,6 +521,7 @@ class PL_l3fwd(PL):
         self.parent.add_group(self.gr_next, actions)
         self.gr_table[(entry.dmac, entry.smac)] = self.gr_next
         self.gr_next += 1
+
 
     def del_group_table_entry(self, entry):
         key = (entry.dmac, entry.smac)
